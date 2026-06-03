@@ -1,6 +1,12 @@
 # Boundary Detection System
 
+[![Python 3.8+](https://img.shields.io/badge/Python-3.8%2B-blue)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/your-username/boundary_detection?style=flat-square)](https://github.com/your-username/boundary_detection/stargazers)
+
 An AI-powered object detection and boundary monitoring system using YOLOv8 and Python. This project enables real-time detection of persons/objects crossing into defined alarm zones with visual alerts and optional GUI dashboard.
+
+**[📖 Full Documentation](#documentation) | [🚀 Quick Start](#quick-start) | [🤝 Contributing](CONTRIBUTING.md) | [📦 Dataset](https://roboflow.com)**
 
 ## Features
 
@@ -24,19 +30,24 @@ An AI-powered object detection and boundary monitoring system using YOLOv8 and P
 
 1. **Clone or download the project**:
    ```bash
+   git clone https://github.com/your-username/boundary_detection.git
    cd boundary_detection
    ```
 
-2. **Install dependencies**:
+2. **Create a virtual environment** (recommended):
    ```bash
-   pip install ultralytics supervision opencv-python pillow numpy
+   python -m venv venv
+   source venv/Scripts/activate  # On Windows: venv\Scripts\activate
    ```
 
-   For additional dependencies, check the imports in the Python files.
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-3. **Download pre-trained models** (optional):
-   - `yolov8n.pt` - Nano model (lighter, faster)
-   - `upgraded_model.pt` - Custom fine-tuned model (more accurate)
+4. **Download pre-trained models** (optional):
+   - The `yolov8n.pt` model will be auto-downloaded on first run
+   - For `upgraded_model.pt`, see [models/README.md](models/README.md)
 
 ## Project Structure
 
@@ -192,23 +203,59 @@ EXCLUSION_ZONES_RAW = [
 - Check that `VIDEO_PATH` points to a valid video file
 - Ensure the video codec is supported by OpenCV
 - Try converting the video to a more common format (MP4, AVI)
+- Verify the file path is correct (use absolute paths if relative paths fail)
 
 ### No Detections
-- Reduce confidence threshold: `model(frame, conf=0.3)`
+- Reduce confidence threshold: `model(frame, conf=0.3)` 
 - Check that the model path is correct
-- Verify the video quality is sufficient for detection
-- Consider training a custom model on your specific use case
+- Verify the video quality is sufficient for detection (clear, well-lit)
+- Consider training a custom model on your specific use case (see [scripts/train.py](scripts/train.py))
+- Try with `yolov8n.pt` if using custom model
+- Check console output for error messages
 
 ### False Alarms
 - Use exclusion zones to mask areas with false positives
 - Adjust the polygon coordinates for your alarm zone
 - Increase confidence threshold for stricter detection
+- Check aspect ratio filtering in `boundary_alert3.py` and `boundary_alert4.py`
 
 ### Performance Issues
 - Use the nano model (`yolov8n.pt`) for faster inference
-- Reduce video resolution
-- Lower detection frequency (process every Nth frame)
+- Reduce video resolution in the script
+- Lower detection frequency (process every Nth frame with `if frame_count % 3 == 0`)
 - Enable GPU acceleration (CUDA) if available
+- Close other applications to free up system memory
+
+### Installation Issues
+```bash
+# If pip install fails, try upgrading pip
+pip install --upgrade pip
+
+# For GPU support (CUDA), install torch separately
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
+
+# Verify installation
+python src/test.py
+```
+
+### Virtual Environment Issues
+```bash
+# Recreate venv if corrupted
+rm -r venv  # or rmdir venv /s /q on Windows
+python -m venv venv
+source venv/Scripts/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+## Getting Help
+
+1. **Check the [FAQ](#troubleshooting) section above**
+2. **Review [CONTRIBUTING.md](CONTRIBUTING.md) for issue templates**
+3. **Search existing [GitHub Issues](https://github.com/your-username/boundary_detection/issues)**
+4. **Create a new issue with:**
+   - Clear description and screenshots
+   - Full error message/traceback
+   - Your system info (OS, Python version, GPU/CPU)
 
 ## Requirements
 
@@ -221,21 +268,33 @@ Key Python packages:
 
 ## Future Enhancements
 
-- [ ] Web-based dashboard
+- [ ] Web-based dashboard (Flask/Django)
 - [ ] Multi-camera support
 - [ ] Persistent logging and alerting
 - [ ] Email/SMS notifications
 - [ ] Advanced analytics and statistics
 - [ ] Support for additional model architectures
+- [ ] REST API for third-party integrations
+- [ ] Mobile app for monitoring
+- [ ] Real-time cloud streaming
+
+## Related Resources
+
+- **Dataset**: [Download from Roboflow](https://roboflow.com) (original source)
+- **YOLOv8 Docs**: [ultralytics.com](https://docs.ultralytics.com/)
+- **Supervision**: [GitHub - roboflow/supervision](https://github.com/roboflow/supervision)
+- **OpenCV**: [opencv.org](https://opencv.org/)
 
 ## License
 
 Include appropriate license information if applicable.
 
-## Support
+## Support & Contributing
 
-For issues or questions:
-1. Check the Troubleshooting section
-2. Review the configuration guide
-3. Ensure all dependencies are properly installed
-4. Verify video and model files exist at specified paths
+- 📖 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines
+- 🐛 Report bugs in [GitHub Issues](https://github.com/your-username/boundary_detection/issues)
+- 💬 Discuss features in [GitHub Discussions](https://github.com/your-username/boundary_detection/discussions)
+
+---
+
+**Made with ❤️ for security and monitoring**

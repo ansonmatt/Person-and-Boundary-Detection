@@ -59,7 +59,7 @@ outputs/
 logs/
 
 # Datasets (optional - uncomment if not tracking)
-# datasets/
+datasets/
 
 # API Keys and credentials
 API Key
