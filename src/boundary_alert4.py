@@ -10,7 +10,12 @@ from PIL import Image, ImageTk
 # CONFIGURATION ZONE
 # ==========================================
 VIDEO_PATH = "videos/test4.mp4"
-MODEL_PATH = "upgraded_model.pt"
+MODEL_PATH = "best.pt"
+
+# YOLO Inference Settings (optimized for accuracy)
+YOLO_IMG_SIZE = 640  # Increased from 480 for better detection of distant/small people
+YOLO_NMS_CONF = 0.45  # NMS threshold to reduce overlapping detections
+YOLO_DEFAULT_CONF = 40  # Better default confidence threshold
 
 ALARM_POLYGON = np.array([
     [725, 852],
@@ -79,7 +84,7 @@ class SecurityDashboard:
                                      font=("Consolas", 12), bg="#121212", fg="white")
         self.slider_label.pack(side=tk.LEFT, padx=10)
 
-        self.conf_var = tk.IntVar(value=30) 
+        self.conf_var = tk.IntVar(value=YOLO_DEFAULT_CONF) 
         self.conf_slider = tk.Scale(self.control_frame, from_=10, to=90, orient=tk.HORIZONTAL, 
                                     bg="#252526", fg="white", highlightthickness=0, length=200,
                                     variable=self.conf_var) 
@@ -107,16 +112,24 @@ class SecurityDashboard:
         self.frame_count += 1
 
         # --- AI PROCESSING ---
-        if self.frame_count % 3 == 0:
+        if self.frame_count % 2 == 0:  # Reduced from 3 to 2 for better tracking consistency
             current_conf = self.conf_var.get() / 100.0 
             
-            # 1. Run YOLO 
-            results = self.model(frame, conf=current_conf, imgsz=480)[0]
+            # 1. Run YOLO with optimized parameters
+            results = self.model(frame, conf=current_conf, imgsz=YOLO_IMG_SIZE, iou=YOLO_NMS_CONF)[0]
             detections = sv.Detections.from_ultralytics(results)
             detections = detections[detections.class_id == 0]
             
-            # 2. FILTER: Blue Exclusion Zones (KILL THE POLES FIRST)
-            if self.exclusion_zones:
+            # 2a. FILTER: Remove tiny detections (likely false positives)
+            if len(detections) > 0:
+                widths = detections.xyxy[:, 2] - detections.xyxy[:, 0]
+                heights = detections.xyxy[:, 3] - detections.xyxy[:, 1]
+                min_size = 20  # Minimum bounding box width/height in pixels
+                valid_size = (widths >= min_size) & (heights >= min_size)
+                detections = detections[valid_size]
+            
+            # 2b. FILTER: Blue Exclusion Zones (KILL THE POLES FIRST)
+            if self.exclusion_zones and len(detections) > 0:
                 widths = detections.xyxy[:, 2] - detections.xyxy[:, 0]
                 heights = detections.xyxy[:, 3] - detections.xyxy[:, 1]
                 aspect_ratios = heights / widths
@@ -125,7 +138,8 @@ class SecurityDashboard:
                 for excl_zone in self.exclusion_zones:
                     in_this_zone = excl_zone.trigger(detections=detections)
                     for i in range(len(detections)):
-                        if in_this_zone[i] and aspect_ratios[i] > 3.0:
+                        # Filter out pole-like detections in exclusion zones (tall and narrow)
+                        if in_this_zone[i] and aspect_ratios[i] > 2.5:
                             keep_mask[i] = False
                             
                 detections = detections[keep_mask]

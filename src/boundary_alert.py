@@ -7,7 +7,12 @@ from ultralytics import YOLO
 # CONFIGURATION ZONE (Update these for each new video)
 # ==========================================
 VIDEO_PATH = "videos/test.mp4"
-MODEL_PATH = "upgraded_model.pt" # Or yolov8n.pt if starting completely fresh
+MODEL_PATH = "best.pt" # Or yolov8n.pt if starting completely fresh
+
+# YOLO Inference Settings (optimized for accuracy)
+YOLO_IMG_SIZE = 640  # Increased from 480 for better detection of distant/small people
+YOLO_NMS_CONF = 0.45  # NMS threshold to reduce overlapping detections
+YOLO_DEFAULT_CONF = 0.4  # Default confidence threshold (40%)
 
 # Paste your Red Alarm Zone coordinates here
 ALARM_POLYGON = np.array([
@@ -44,12 +49,20 @@ while cap.isOpened():
     if not ret:
         break
 
-    # 3. Run YOLO (conf=0.3 to catch pedestrians reliably)
-    results = model(frame, conf=0.3)[0]
+    # 3. Run YOLO with optimized parameters
+    results = model(frame, conf=YOLO_DEFAULT_CONF, imgsz=YOLO_IMG_SIZE, iou=YOLO_NMS_CONF)[0]
     detections = sv.Detections.from_ultralytics(results)
     
     # Keep ONLY 'Person' (class_id 0)
     detections = detections[detections.class_id == 0]
+    
+    # 3a. FILTER: Remove tiny detections (likely false positives)
+    if len(detections) > 0:
+        widths = detections.xyxy[:, 2] - detections.xyxy[:, 0]
+        heights = detections.xyxy[:, 3] - detections.xyxy[:, 1]
+        min_size = 20  # Minimum bounding box width/height in pixels
+        valid_size = (widths >= min_size) & (heights >= min_size)
+        detections = detections[valid_size]
     
     # 4. FILTER: Smart Exclusion Zones (The "Count Increase" Logic)
     if exclusion_zones:
