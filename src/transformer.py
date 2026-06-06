@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import supervision as sv
 from ultralytics import YOLO
+from ultralytics import RTDETR
 import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
@@ -9,22 +10,23 @@ from PIL import Image, ImageTk
 # ==========================================
 # CONFIGURATION ZONE
 # ==========================================
-VIDEO_PATH = "videos/test.mp4"
-MODEL_PATH = "best.pt"
+VIDEO_PATH = "videos/test4.mp4"
+MODEL_PATH = "transformer.pt"
 
-# YOLO Inference Settings (optimized for accuracy)
-YOLO_IMG_SIZE = 640  # Increased from 480 for better detection of distant/small people
-YOLO_NMS_CONF = 0.45  # NMS threshold to reduce overlapping detections
-YOLO_DEFAULT_CONF = 40  # Better default confidence threshold (your model is accurate)
+# Model Inference Settings (optimized for accuracy)
+MODEL_IMG_SIZE = 640  # Increased from 480 for better detection of distant/small people
+MODEL_NMS_CONF = 0.45  # NMS threshold to reduce overlapping detections
+MODEL_DEFAULT_CONF = 40  # Better default confidence threshold
 
-# The Red Alarm Zone
 ALARM_POLYGON = np.array([
-    [200, 200], [800, 200], [800, 600], [200, 600] 
+    [725, 852],
+    [956, 760],
+    [1169, 798],
+    [948, 931],
 ])
 
-# Your 5 Custom Exclusion Zones
-EXCLUSION_ZONES_RAW = [
-]
+# Paste your blue exclusion zones here if you have them
+EXCLUSION_ZONES_RAW = [] 
 # ==========================================
 
 class SecurityDashboard:
@@ -42,17 +44,21 @@ class SecurityDashboard:
             messagebox.showerror("Error", "Could not load video feed.")
             self.root.quit()
 
-        # 2. Setup Supervision Tools
+        # 2. Setup Supervision Tools 
         self.zone = sv.PolygonZone(polygon=ALARM_POLYGON)
         self.zone_annotator = sv.PolygonZoneAnnotator(zone=self.zone, color=sv.Color.RED)
         self.box_annotator = sv.BoxAnnotator()
         self.label_annotator = sv.LabelAnnotator(text_color=sv.Color.BLACK) 
         
+        # --- BYTETRACK & PATH TRACING ---
+        self.tracker = sv.ByteTrack()  
+        self.trace_annotator = sv.TraceAnnotator(thickness=2, trace_length=60)
+        
         self.exclusion_zones = [sv.PolygonZone(polygon=p) for p in EXCLUSION_ZONES_RAW]
         self.excl_annotators = [sv.PolygonZoneAnnotator(zone=z, color=sv.Color.BLUE) for z in self.exclusion_zones]
 
         # 3. Build the UI (Dark Mode Theme)
-        self.root.configure(bg="#121212")
+        self.root.configure(bg="#121212") 
 
         # Title
         self.title_label = tk.Label(root, text="🛡️ AI PERIMETER SECURITY", 
@@ -69,12 +75,17 @@ class SecurityDashboard:
         self.control_frame = tk.Frame(root, bg="#121212")
         self.control_frame.pack(pady=20, fill=tk.X, padx=50)
 
+        # Total Count Label
+        self.count_label = tk.Label(self.control_frame, text="Total People: 0", 
+                                    font=("Consolas", 14, "bold"), bg="#121212", fg="#00FF41")
+        self.count_label.pack(side=tk.LEFT, padx=20)
+
         # Live Confidence Slider 
         self.slider_label = tk.Label(self.control_frame, text="AI Confidence:", 
                                      font=("Consolas", 12), bg="#121212", fg="white")
         self.slider_label.pack(side=tk.LEFT, padx=10)
 
-        self.conf_var = tk.IntVar(value=YOLO_DEFAULT_CONF) 
+        self.conf_var = tk.IntVar(value=MODEL_DEFAULT_CONF) 
         self.conf_slider = tk.Scale(self.control_frame, from_=10, to=90, orient=tk.HORIZONTAL, 
                                     bg="#252526", fg="white", highlightthickness=0, length=200,
                                     variable=self.conf_var) 
@@ -89,8 +100,8 @@ class SecurityDashboard:
         # 4. State tracking & Start Loop
         self.frame_count = 0
         self.last_detections = None
+        self.unique_people_in_zone = set()  # Track unique people IDs in alarm zone
         
-        print("Starting Smart Multi-Zone Boundary Detection System...")
         self.update_frame()
 
     def update_frame(self):
@@ -101,20 +112,16 @@ class SecurityDashboard:
 
         self.frame_count += 1
 
-        # --- AI PROCESSING (Runs every 2nd frame for better tracking) ---
-        if self.frame_count % 2 == 0:
-            
-            # 1. Read live slider value
+        # --- AI PROCESSING ---
+        if self.frame_count % 2 == 0:  # Reduced from 3 to 2 for better tracking consistency
             current_conf = self.conf_var.get() / 100.0 
             
-            # 2. Run YOLO with optimized parameters
-            results = self.model(frame, conf=current_conf, imgsz=YOLO_IMG_SIZE, iou=YOLO_NMS_CONF)[0]
+            # 1. Run model with optimized parameters
+            results = self.model(frame, conf=current_conf, imgsz=MODEL_IMG_SIZE, iou=MODEL_NMS_CONF)[0]
             detections = sv.Detections.from_ultralytics(results)
-            
-            # 3. Ensure we ONLY track 'Person' (class_id 0)
             detections = detections[detections.class_id == 0]
             
-            # 3a. FILTER: Remove tiny detections (likely false positives)
+            # 2a. FILTER: Remove tiny detections (likely false positives)
             if len(detections) > 0:
                 widths = detections.xyxy[:, 2] - detections.xyxy[:, 0]
                 heights = detections.xyxy[:, 3] - detections.xyxy[:, 1]
@@ -122,34 +129,56 @@ class SecurityDashboard:
                 valid_size = (widths >= min_size) & (heights >= min_size)
                 detections = detections[valid_size]
             
-            # 4. FILTER: The "Count Increase" Logic
-            if self.exclusion_zones:
+            # 2b. FILTER: Blue Exclusion Zones (KILL THE POLES FIRST)
+            if self.exclusion_zones and len(detections) > 0:
+                widths = detections.xyxy[:, 2] - detections.xyxy[:, 0]
+                heights = detections.xyxy[:, 3] - detections.xyxy[:, 1]
+                aspect_ratios = heights / widths
                 keep_mask = np.ones(len(detections), dtype=bool)
+                
                 for excl_zone in self.exclusion_zones:
                     in_this_zone = excl_zone.trigger(detections=detections)
-                    current_count = np.sum(in_this_zone)
-                    
-                    if current_count == 1:
-                        keep_mask[in_this_zone] = False
-                        
+                    for i in range(len(detections)):
+                        # Filter out pole-like detections in exclusion zones (tall and narrow)
+                        if in_this_zone[i] and aspect_ratios[i] > 2.5:
+                            keep_mask[i] = False
+                            
                 detections = detections[keep_mask]
+
+            # 3. TRACKING: Assign IDs to the surviving humans
+            detections = self.tracker.update_with_detections(detections)
+            
+            # 4. COUNTING: Track unique people who entered the alarm zone
+            is_inside = self.zone.trigger(detections=detections)
+            for idx, inside in enumerate(is_inside):
+                # Ensure the detection has an ID before adding it to the set
+                if inside and detections.tracker_id is not None:
+                    self.unique_people_in_zone.add(int(detections.tracker_id[idx]))
+            
+            # Update the count label
+            self.count_label.config(text=f"Total People: {len(self.unique_people_in_zone)}")
             
             self.last_detections = detections
 
         # --- DRAWING ---
         if self.last_detections is not None:
-            # Check Alarm
             is_inside = self.zone.trigger(detections=self.last_detections)
             if is_inside.any():
                 cv2.putText(frame, "ALERT: ZONE BREACH", (50, 50), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
             
-            # Generate and draw floating percentage labels
-            labels = [f"{int(conf * 100)}%" for conf in self.last_detections.confidence]
+            # Generate labels showing tracking ID and Confidence (e.g., "#5 88%")
+            labels = []
+            for i in range(len(self.last_detections)):
+                tracker_id = self.last_detections.tracker_id[i] if self.last_detections.tracker_id is not None else "N/A"
+                conf = int(self.last_detections.confidence[i] * 100)
+                labels.append(f"#{tracker_id} {conf}%")
+            
+            # Draw Paths, Boxes, and Labels
+            frame = self.trace_annotator.annotate(scene=frame, detections=self.last_detections)
             frame = self.box_annotator.annotate(scene=frame, detections=self.last_detections)
             frame = self.label_annotator.annotate(scene=frame, detections=self.last_detections, labels=labels)
             
-        # Draw the Red and Blue zones
         frame = self.zone_annotator.annotate(scene=frame)
         for annotator in self.excl_annotators:
             frame = annotator.annotate(scene=frame)
@@ -161,7 +190,7 @@ class SecurityDashboard:
         
         self.video_canvas.create_image(0, 0, image=self.current_image, anchor=tk.NW)
 
-        # Trigger loop
+        # --- LOOP TRIGGER ---
         self.root.after(15, self.update_frame)
 
     def quit_app(self):
