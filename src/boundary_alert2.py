@@ -9,8 +9,13 @@ from PIL import Image, ImageTk
 # ==========================================
 # CONFIGURATION ZONE
 # ==========================================
-VIDEO_PATH = "videos/test2.mp4"
-MODEL_PATH = "upgraded_model.pt"
+VIDEO_PATH = "videos/test.mp4"
+MODEL_PATH = "best.pt"
+
+# YOLO Inference Settings (optimized for accuracy)
+YOLO_IMG_SIZE = 640  # Increased from 480 for better detection of distant/small people
+YOLO_NMS_CONF = 0.45  # NMS threshold to reduce overlapping detections
+YOLO_DEFAULT_CONF = 40  # Better default confidence threshold (your model is accurate)
 
 # The Red Alarm Zone
 ALARM_POLYGON = np.array([
@@ -19,11 +24,6 @@ ALARM_POLYGON = np.array([
 
 # Your 5 Custom Exclusion Zones
 EXCLUSION_ZONES_RAW = [
-    np.array([[460, 100], [580, 100], [580, 350], [460, 350]]),      # Traffic Light 1 
-    np.array([[1020, 650], [1240, 650], [1240, 2000], [1020, 2000]]), # Light 2 (Off-screen)
-    np.array([[660, 0], [770, 0], [770, 270], [660, 270]]),          # Pole 1 
-    np.array([[940, 300], [1070, 300], [1070, 640], [940, 640]]),    # Lights 4 
-    np.array([[1280, 110], [1400, 110], [1400, 360], [1280, 360]])   # Traffic Lights 2 
 ]
 # ==========================================
 
@@ -74,7 +74,7 @@ class SecurityDashboard:
                                      font=("Consolas", 12), bg="#121212", fg="white")
         self.slider_label.pack(side=tk.LEFT, padx=10)
 
-        self.conf_var = tk.IntVar(value=30) 
+        self.conf_var = tk.IntVar(value=YOLO_DEFAULT_CONF) 
         self.conf_slider = tk.Scale(self.control_frame, from_=10, to=90, orient=tk.HORIZONTAL, 
                                     bg="#252526", fg="white", highlightthickness=0, length=200,
                                     variable=self.conf_var) 
@@ -101,18 +101,26 @@ class SecurityDashboard:
 
         self.frame_count += 1
 
-        # --- AI PROCESSING (Runs every 3rd frame for speed) ---
-        if self.frame_count % 3 == 0:
+        # --- AI PROCESSING (Runs every 2nd frame for better tracking) ---
+        if self.frame_count % 2 == 0:
             
             # 1. Read live slider value
             current_conf = self.conf_var.get() / 100.0 
             
-            # 2. Run YOLO
-            results = self.model(frame, conf=current_conf, imgsz=480)[0]
+            # 2. Run YOLO with optimized parameters
+            results = self.model(frame, conf=current_conf, imgsz=YOLO_IMG_SIZE, iou=YOLO_NMS_CONF)[0]
             detections = sv.Detections.from_ultralytics(results)
             
             # 3. Ensure we ONLY track 'Person' (class_id 0)
             detections = detections[detections.class_id == 0]
+            
+            # 3a. FILTER: Remove tiny detections (likely false positives)
+            if len(detections) > 0:
+                widths = detections.xyxy[:, 2] - detections.xyxy[:, 0]
+                heights = detections.xyxy[:, 3] - detections.xyxy[:, 1]
+                min_size = 20  # Minimum bounding box width/height in pixels
+                valid_size = (widths >= min_size) & (heights >= min_size)
+                detections = detections[valid_size]
             
             # 4. FILTER: The "Count Increase" Logic
             if self.exclusion_zones:

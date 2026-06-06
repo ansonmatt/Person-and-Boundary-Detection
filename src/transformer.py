@@ -2,6 +2,7 @@ import cv2
 import numpy as np
 import supervision as sv
 from ultralytics import YOLO
+from ultralytics import RTDETR
 import tkinter as tk
 from tkinter import messagebox
 from PIL import Image, ImageTk
@@ -9,17 +10,21 @@ from PIL import Image, ImageTk
 # ==========================================
 # CONFIGURATION ZONE
 # ==========================================
-VIDEO_PATH = "videos/#VIDEO_NAME#.mp4"
-MODEL_PATH = "best.pt"
+VIDEO_PATH = "videos/test4.mp4"
+MODEL_PATH = "transformer.pt"
 
-# YOLO Inference Settings (optimized for accuracy)
-YOLO_IMG_SIZE = 640  # Increased from 480 for better detection of distant/small people
-YOLO_NMS_CONF = 0.45  # NMS threshold to reduce overlapping detections
-YOLO_DEFAULT_CONF = 40  # Better default confidence threshold
+# Model Inference Settings (optimized for accuracy)
+MODEL_IMG_SIZE = 640  # Increased from 480 for better detection of distant/small people
+MODEL_NMS_CONF = 0.45  # NMS threshold to reduce overlapping detections
+MODEL_DEFAULT_CONF = 40  # Better default confidence threshold
 
 ALARM_POLYGON = np.array([
-   # Paste your red alarm zone coordinates here (e.g., [[x1, y1], [x2, y2], ...
+    [725, 852],
+    [956, 760],
+    [1169, 798],
+    [948, 931],
 ])
+
 # Paste your blue exclusion zones here if you have them
 EXCLUSION_ZONES_RAW = [] 
 # ==========================================
@@ -56,17 +61,17 @@ class SecurityDashboard:
         self.root.configure(bg="#121212") 
 
         # Title
-        self.title_label = tk.Label(root, text="AI PERIMETER SECURITY", 
+        self.title_label = tk.Label(root, text="🛡️ AI PERIMETER SECURITY", 
                                     font=("Consolas", 18, "bold"), 
                                     bg="#121212", fg="#00FF41")
         self.title_label.pack(pady=15)
 
-        # Video Canvas with Border
+        # Video Canvas
         self.video_canvas = tk.Canvas(root, width=960, height=540, bg="black", 
                                       highlightthickness=2, highlightbackground="#333333")
         self.video_canvas.pack()
 
-        # Control Panel Frame (Count + Slider + Quit Button)
+        # Control Panel Frame
         self.control_frame = tk.Frame(root, bg="#121212")
         self.control_frame.pack(pady=20, fill=tk.X, padx=50)
 
@@ -75,12 +80,12 @@ class SecurityDashboard:
                                     font=("Consolas", 14, "bold"), bg="#121212", fg="#00FF41")
         self.count_label.pack(side=tk.LEFT, padx=20)
 
-        # Live Confidence Slider
+        # Live Confidence Slider 
         self.slider_label = tk.Label(self.control_frame, text="AI Confidence:", 
                                      font=("Consolas", 12), bg="#121212", fg="white")
         self.slider_label.pack(side=tk.LEFT, padx=10)
 
-        self.conf_var = tk.IntVar(value=YOLO_DEFAULT_CONF) 
+        self.conf_var = tk.IntVar(value=MODEL_DEFAULT_CONF) 
         self.conf_slider = tk.Scale(self.control_frame, from_=10, to=90, orient=tk.HORIZONTAL, 
                                     bg="#252526", fg="white", highlightthickness=0, length=200,
                                     variable=self.conf_var) 
@@ -111,8 +116,8 @@ class SecurityDashboard:
         if self.frame_count % 2 == 0:  # Reduced from 3 to 2 for better tracking consistency
             current_conf = self.conf_var.get() / 100.0 
             
-            # 1. Run YOLO with optimized parameters
-            results = self.model(frame, conf=current_conf, imgsz=YOLO_IMG_SIZE, iou=YOLO_NMS_CONF)[0]
+            # 1. Run model with optimized parameters
+            results = self.model(frame, conf=current_conf, imgsz=MODEL_IMG_SIZE, iou=MODEL_NMS_CONF)[0]
             detections = sv.Detections.from_ultralytics(results)
             detections = detections[detections.class_id == 0]
             
@@ -124,9 +129,8 @@ class SecurityDashboard:
                 valid_size = (widths >= min_size) & (heights >= min_size)
                 detections = detections[valid_size]
             
-            # 2b. FILTER: Blue Exclusion Zones
+            # 2b. FILTER: Blue Exclusion Zones (KILL THE POLES FIRST)
             if self.exclusion_zones and len(detections) > 0:
-                # We will filter out detections that are likely poles based on their aspect ratio and if they are in the blue zones
                 widths = detections.xyxy[:, 2] - detections.xyxy[:, 0]
                 heights = detections.xyxy[:, 3] - detections.xyxy[:, 1]
                 aspect_ratios = heights / widths
@@ -160,11 +164,10 @@ class SecurityDashboard:
         if self.last_detections is not None:
             is_inside = self.zone.trigger(detections=self.last_detections)
             if is_inside.any():
-                cv2.putText(frame, "ALERT: ZONE BREACH", (50, 50),
+                cv2.putText(frame, "ALERT: ZONE BREACH", (50, 50), 
                             cv2.FONT_HERSHEY_SIMPLEX, 1.5, (0, 0, 255), 4)
             
             # Generate labels showing tracking ID and Confidence (e.g., "#5 88%")
-            # We need to ensure that we have tracker IDs and confidence scores for each detection before generating labels
             labels = []
             for i in range(len(self.last_detections)):
                 tracker_id = self.last_detections.tracker_id[i] if self.last_detections.tracker_id is not None else "N/A"
@@ -181,7 +184,6 @@ class SecurityDashboard:
             frame = annotator.annotate(scene=frame)
 
         # --- TKINTER IMAGE CONVERSION ---
-        # To display the OpenCV frame in Tkinter, we need to convert it to RGB and then to a format Tkinter can use
         frame_resized = cv2.resize(frame, (960, 540))
         frame_rgb = cv2.cvtColor(frame_resized, cv2.COLOR_BGR2RGB)
         self.current_image = ImageTk.PhotoImage(image=Image.fromarray(frame_rgb))
@@ -189,16 +191,15 @@ class SecurityDashboard:
         self.video_canvas.create_image(0, 0, image=self.current_image, anchor=tk.NW)
 
         # --- LOOP TRIGGER ---
-        self.root.after(15, self.update_frame) # Adjust the delay as needed for smoother performance
+        self.root.after(15, self.update_frame)
 
     def quit_app(self):
         self.cap.release()
-        self.root.destroy() # Cleanly release video resources and close the application
+        self.root.destroy()
 
 # ==========================================
 # LAUNCH THE APP
 # ==========================================
-# The main entry point of the application. We create a Tkinter root window and instantiate our SecurityDashboard class, which sets up everything and starts the main loop.
 if __name__ == "__main__":
     root = tk.Tk()
     app = SecurityDashboard(root)
